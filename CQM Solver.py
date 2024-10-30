@@ -55,7 +55,6 @@ for k in range(num_vehicles):
     cqm.add_constraint(lhs <= num_customers, label=f'vehicle_usage_constraint_upper_{k}')
     cqm.add_constraint(lhs >= 1, label=f'vehicle_usage_constraint_lower_{k}')
 
-# Set objective function
 cqm.set_objective(objective)
 
 # Each customer is visited exactly once

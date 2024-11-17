@@ -61,7 +61,7 @@ for k in range(num_vehicles):
     )
 
 # c4 Time window constraints with slack
-slack = 5
+slack = 1
 for i in range(1, num_customers):
     lower_bound = time_windows[i-1][0] - slack
     upper_bound = time_windows[i-1][1] + slack

@@ -6,35 +6,35 @@ import matplotlib.pyplot as plt
 from dimod import ConstrainedQuadraticModel, quicksum, Binary, Real
 from dwave.system import LeapHybridCQMSampler
 
-# input data
+# Load input data
 distances_df = pd.read_csv('Input/travel_times.csv', index_col=0)
 customers_df = pd.read_csv('Input/customers.csv')
 vehicles_df = pd.read_csv('Input/vehicles.csv')
 
-# convert distance to float
+# Ensure distances are converted to floats
 distances = distances_df.to_numpy(dtype=float)
 
-# assign parameters
-num_customers = len(customers_df) + 1  
+# Parameters
+num_customers = len(customers_df) + 1  # Including depot
 num_vehicles = len(vehicles_df)
 time_windows = list(zip(customers_df['start_time'], customers_df['end_time']))
 service_times = list(customers_df['service_time'])
 
-# check demand and capacity
+# Demand and capacity checks
 total_demand = customers_df['demand'].sum()
 total_capacity = vehicles_df['capacity'].sum()
-print(f"Total demand: {total_demand}, Total capacity: {total_capacity}")
+print(f"Total demand: {total_demand}, Total vehicle capacity: {total_capacity}")
 if total_demand > total_capacity:
-    print("Warning: Total demand exceeds capacity, making unfeasible.")
+    print("Warning: Total demand exceeds vehicle capacity, making feasibility unlikely.")
 
-# initialize CQM
+# Initialize CQM
 cqm = ConstrainedQuadraticModel()
 
-# define variables
+# Decision variables
 x = {(i, j, k): Binary(f'x_{i}_{j}_{k}') for k in range(num_vehicles) for i in range(num_customers) for j in range(num_customers) if i != j}
 start_times = {i: Real(f'start_time_{i}', lower_bound=0, upper_bound=max(customers_df['end_time'])) for i in range(1, num_customers)}
 
-# objective function
+# Objective function (minimizing travel distance)
 objective = dimod.BinaryQuadraticModel({}, {}, 0.0, 'BINARY')
 for i in range(num_customers):
     for j in range(num_customers):
@@ -44,24 +44,25 @@ for i in range(num_customers):
 
 cqm.set_objective(objective)
 
-# c1 each customer is visited once
+# Constraints
+# Each customer is visited once
 for j in range(1, num_customers):
     cqm.add_constraint(quicksum(x[i, j, k] for i in range(num_customers) for k in range(num_vehicles) if i != j) == 1, label=f"visit_customer_{j}")
 
-# c2 vehicles leave and return to the depot
+# Vehicles leave and return to the depot
 for k in range(num_vehicles):
     cqm.add_constraint(quicksum(x[0, j, k] for j in range(1, num_customers)) == 1, label=f"leave_depot_{k+1}")
     cqm.add_constraint(quicksum(x[i, 0, k] for i in range(1, num_customers)) == 1, label=f"return_depot_{k+1}")
 
-# c3 capacity constraint for vehicles
+# Capacity constraint for vehicles
 for k in range(num_vehicles):
     cqm.add_constraint(
         quicksum(customers_df['demand'][j-1] * quicksum(x[i, j, k] for i in range(1, num_customers) if i != j) for j in range(1, num_customers)) <= vehicles_df['capacity'][k],
         label=f"capacity_vehicle_{k+1}"
     )
 
-# c4 Time window constraints with slack
-slack = 1
+# Time window constraints with slack
+slack = 5
 for i in range(1, num_customers):
     lower_bound = time_windows[i-1][0] - slack
     upper_bound = time_windows[i-1][1] + slack
@@ -80,7 +81,7 @@ else:
     print("No feasible solution found")
     exit()
 
-# extract routes
+# Extract routes
 routes = {k: [] for k in range(num_vehicles)}
 for k in range(num_vehicles):
     current_node = 0  # Start from the depot
@@ -98,11 +99,12 @@ for k in range(num_vehicles):
         current_node = next_node
     routes[k].append(0)  # Return to depot
 
-# handle missing customers
+# Adjusting customer reassignment logic to ensure ascending order
+# Handle missing customers with ascending order constraint
 missing_customers = set(range(1, num_customers)) - set().union(*[set(route) for route in routes.values()])
 if missing_customers:
     print(f"Customers not covered: {missing_customers}")
-    for missing in sorted(missing_customers): 
+    for missing in sorted(missing_customers):  # Sort customers before reassignment
         best_vehicle = None
         best_insert_position = None
         min_additional_distance = float('inf')
@@ -119,7 +121,7 @@ if missing_customers:
                     next_idx = max(0, next_node - 1) if next_node > 0 else 0
                     missing_idx = max(0, missing - 1)
 
-                    # check for valid insertion to maintain ascending order
+                    # Check for valid insertion to maintain ascending order
                     if (prev_node < missing < next_node) or (idx == len(routes[k]) - 1):  # Allow at end if higher
                         if all(0 <= index < distances.shape[0] for index in [prev_idx, next_idx, missing_idx]):
                             additional_distance = (distances[prev_idx, missing_idx] + distances[missing_idx, next_idx] - distances[prev_idx, next_idx])
@@ -134,14 +136,15 @@ if missing_customers:
         else:
             print(f"Unable to assign customer {missing} within constraints")
 
-# final route check
+# Final route check and sorting for ascending order
 for k, route in routes.items():
-    route = sorted(route[:-1]) + [0]
+    # Ensure routes are sorted in ascending order (excluding depot, which is always first and last)
+    route = sorted(route[:-1]) + [0]  # Sort all except depot return
     routes[k] = route
     capacity_used = sum(customers_df['demand'][i-1] for i in route if i > 0)
     print(f"Vehicle {k+1} route: {route}, Capacity used: {capacity_used}")
 
-# Plot
+# Plotting (unchanged)
 plt.figure(figsize=(10, 6))
 plt.plot(0, 0, 'ro', markersize=10, label='Depot')
 for i in range(1, num_customers):
